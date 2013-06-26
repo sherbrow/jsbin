@@ -70,6 +70,7 @@ echo $mustache->render($view, array(
   'list_history' => $embed ? '' : $list_history,
   'jsbin' => json_encode(array(
     'root' => ROOT,
+    'static' => STATIC_URL,
     'version' => VERSION,
     'state' => array(
       'stream' => false,
