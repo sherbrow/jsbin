@@ -1,4 +1,5 @@
 <?php
+
 date_default_timezone_set('Europe/London');
 
 require_once('../vendor/bcrypt.php');
@@ -410,9 +411,9 @@ if (!$action) {
   $edit_mode = false;
   
   if ($code_id) {
-    list($latest_revision, $html, $javascript, $css) = getCode($code_id, $revision);
+    list($latest_revision, $html, $javascript, $css, $settings) = getCode($code_id, $revision);
   } else {
-    list($latest_revision, $html, $javascript, $css) = defaultCode();
+    list($latest_revision, $html, $javascript, $css, $settings) = defaultCode();
   }
   
   if ($action == 'js') {
@@ -494,9 +495,10 @@ if (!$action) {
     $revision = $_POST['revision'];
     $panel = $_POST['panel'];
     $content = $_POST['content'];
+    $settings = $_POST['settings'];
 
     if ($panel === 'javascript' || $panel === 'css' || $panel === 'html') {
-      $sql = sprintf('update sandbox set %s="%s", created=now() where url="%s" and revision="%s" and streaming_key="%s" and streaming_key!=""', mysql_real_escape_string($panel), mysql_real_escape_string($content), mysql_real_escape_string($code_id), mysql_real_escape_string($revision), mysql_real_escape_string($checksum));
+      $sql = sprintf('update sandbox set %s="%s", created=now(), settings="%s" where url="%s" and revision="%s" and streaming_key="%s" and streaming_key!=""', mysql_real_escape_string($panel), mysql_real_escape_string($content), mysql_real_escape_string($settings), mysql_real_escape_string($code_id), mysql_real_escape_string($revision), mysql_real_escape_string($checksum));
 
       // TODO run against blacklist
       $ok = mysql_query($sql);
@@ -594,8 +596,8 @@ if (!$action) {
       $revision = getMaxRevision($code_id);
     }
 
-    list($latest_revision, $html, $javascript, $css) = getCode($code_id, $revision);
-    list($html, $javascript, $css) = formatCompletedCode($html, $javascript, $css, $code_id, $revision);
+    list($latest_revision, $html, $javascript, $css, $settings) = getCode($code_id, $revision);
+    list($html, $javascript, $css) = formatCompletedCode($html, $javascript, $css, $code_id, $revision, $settings);
 
     global $quiet;
 
@@ -699,10 +701,27 @@ function getMaxRevision($code_id) {
   return $row->rev ? $row->rev : 0;
 }
 
-function formatCompletedCode($html, $javascript, $css, $code_id, $revision) {
+function formatCompletedCode($html, $javascript, $css, $code_id, $revision, $settings) {
   global $ajax, $quiet;
   
   $javascript = preg_replace('@</script@', "<\/script", $javascript);
+
+  if($settings) {
+    $settings = json_decode($settings);
+
+    if($settings && $settings->processors && $settings->processors->css == 'less' ) {
+      require_once('../vendor/lessphp/lessc.inc.php');
+      $less = new lessc;
+      try {
+        $compiled = $less->compile($css);
+        $css = preg_replace('@\*/@', '* /', $css);
+        $css = '/* '.$css.' */'.$compiled;
+      } catch (exception $e) {
+        // Error silenced
+        // $error = $e->getMessage();
+      }
+    }
+  }
   
   if ($quiet && $html) {
     $html = '<script>window.onfocus=function(){return false;};window.open=window.print=window.confirm=window.prompt=window.alert=function(){};</script>' . $html;
@@ -770,6 +789,7 @@ function getCode($code_id, $revision, $testonly = false) {
     $javascript = preg_replace('/\r/', '', $row->javascript);
     $html = preg_replace('/\r/', '', $row->html);
     $css = preg_replace('/\r/', '', $row->css);
+    $settings = preg_replace('/\r/', '', $row->settings);
 
     $revision = $row->revision;
 
@@ -778,7 +798,7 @@ function getCode($code_id, $revision, $testonly = false) {
     $last_updated = $row->created;
 
     // return array(preg_replace('/\r/', '', $html), preg_replace('/\r/', '', $javascript), $row->streaming, $row->active_tab, $row->active_cursor);
-    return array($revision, get_magic_quotes_gpc() ? stripslashes($html) : $html, get_magic_quotes_gpc() ? stripslashes($javascript) : $javascript, get_magic_quotes_gpc() ? stripslashes($css) : $css);
+    return array($revision, get_magic_quotes_gpc() ? stripslashes($html) : $html, get_magic_quotes_gpc() ? stripslashes($javascript) : $javascript, get_magic_quotes_gpc() ? stripslashes($css) : $css, get_magic_quotes_gpc() ? stripslashes($settings) : $settings);
   }
 }
 
@@ -821,6 +841,7 @@ function defaultCode($not_found = false) {
   }
 
   $css = '';
+  $settings = NULL;
 
   if (@$_REQUEST['css']) {
     $css = $_REQUEST['css'];
@@ -828,7 +849,7 @@ function defaultCode($not_found = false) {
     $css = getDefaultCode('css');
   }
 
-  return array(0, get_magic_quotes_gpc() ? stripslashes($html) : $html, get_magic_quotes_gpc() ? stripslashes($javascript) : $javascript, get_magic_quotes_gpc() ? stripslashes($css) : $css);
+  return array(0, get_magic_quotes_gpc() ? stripslashes($html) : $html, get_magic_quotes_gpc() ? stripslashes($javascript) : $javascript, get_magic_quotes_gpc() ? stripslashes($css) : $css, get_magic_quotes_gpc() ? stripslashes($settings) : $settings);
 }
 
 function getDefaultCode($prop) {
